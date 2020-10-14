@@ -1,0 +1,45 @@
+---
+title: "SURVEY"
+output: html_document
+---
+
+```{r}
+library(qualtRics)
+library(dplyr)
+```
+
+```{r}
+qualtrics_api_credentials(api_key = "GfSD59QSwFLlNpjCP04XiPetqMdpfytZ8w206maX",
+                         base_url = "https://az1.qualtrics.com",
+                         install = TRUE,
+                         overwrite = TRUE)
+```
+
+```{r}
+readRenviron("~/.Renviron")
+```
+
+```{r}
+surveys <- all_surveys()
+```
+
+```{r}
+mysurvey <- fetch_survey(surveyID = surveys$id[1]) 
+```
+
+```{r}
+View(mysurvey)
+```
+
+```{r}
+mysurvey[c()] %>% view(mysurvey)
+```
+
+```{r}
+surveyTest <- mysurvey %>% 
+  unite(mysurvey, key = "States", value = column[122:222], na.rm = FALSE)
+```
+
+
+
+

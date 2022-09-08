@@ -16,7 +16,7 @@ output:
 
 1. 데이터베이스에 뽑아올 가능성이 높다 <- Join 을 잘 써야한다.
 2. 바이너리 문제가 나올 가능성이 높다 (A VS B)
-3. 텍스트마이닝을 할 가능성이 높다. 
+3. 텍스트마이닝을 할 가능성이 높다.a
 4. 금융정보에 대한 지식이 필요할 가능성이 높다 (feature selection)
 
 5. Outlier Detection (KNN = K-NEIGHTBORHOOD-NEAREST)

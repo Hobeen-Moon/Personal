@@ -1,0 +1,194 @@
+---
+title: "ML Model"
+author: "Hobeen Moon"
+date: "3/18/2023"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    toc_depth: 3
+    number_sections: true
+    theme: lumen
+editor_options: 
+  chunk_output_type: console
+---
+# Introduction
+Swire Coca-Cola's B2B business is driven by local businesses such as restaurants, and determining the profitability of these businesses is crucial for pricing and funding decisions. Swire has difficulty accurately predicting the popularity, longevity, and sales volume of new restaurants in their market. This results in a risk of offering lower prices to unprofitable businesses and losing investment.
+
+By improving the ability to predict the success of new restaurants, Swire Coca-Cola can make more informed pricing and funding decisions, resulting in a higher likelihood of creating loyal and valuable customers. Additionally, this will help to minimize the risk of investing in unprofitable businesses.
+
+This document will use non-historical data of customers to train a supervised machine learning model that can predict the popularity and total sales volume of new restaurants. The model will be trained on various features such as restaurant type, location, and city population and will be evaluated using metrics such as RMSE.
+
+# Data Preparation
+```{r, warning=FALSE, message = FALSE}
+pacman::p_load(tidyverse, RODBC, tidycensus, fastDummies)
+
+# Load Data
+dat <- read_csv("C:/Users/qlekr/Desktop/School/UoU/UoU/project/combined_data.csv")
+
+# Select non-historical data
+dat1 <- dat %>% select(c(CUSTOMER_NUMBER_BLINDED, SALES_OFFICE_DESCRIPTION, DELIVERY_PLANT_DESCRIPTION, ON_BOARDING_DATE, ADDRESS_CITY, ADDRESS_ZIP_CODE, COUNTY, GEO_LONGITUDE, GEO_LATITUDE, CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION, CUSTOMER_TRADE_CHANNEL_DESCRIPTION, CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION, BUSINESS_TYPE_EXTENSION_DESCRIPTION, MARKET_DESCRIPTION, COLD_DRINK_CHANNEL_DESCRIPTION, INVOICE_PRICE))
+
+# Make target variable (avg_invoice_price)
+dat2 <- dat1 %>% group_by(CUSTOMER_NUMBER_BLINDED) %>% summarise(
+  CUSTOMER_NUMBER_BLINDED = CUSTOMER_NUMBER_BLINDED, 
+  SALES_OFFICE_DESCRIPTION = SALES_OFFICE_DESCRIPTION, 
+  DELIVERY_PLANT_DESCRIPTION = DELIVERY_PLANT_DESCRIPTION, 
+  ON_BOARDING_DATE = ON_BOARDING_DATE, 
+  ADDRESS_CITY = ADDRESS_CITY, 
+  ADDRESS_ZIP_CODE = ADDRESS_ZIP_CODE, 
+  COUNTY = COUNTY, 
+  GEO_LONGITUDE = GEO_LONGITUDE, 
+  GEO_LATITUDE = GEO_LATITUDE, 
+  CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION = CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION, 
+  CUSTOMER_TRADE_CHANNEL_DESCRIPTION = CUSTOMER_TRADE_CHANNEL_DESCRIPTION, 
+  CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION = CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION, 
+  BUSINESS_TYPE_EXTENSION_DESCRIPTION = BUSINESS_TYPE_EXTENSION_DESCRIPTION, 
+  MARKET_DESCRIPTION = MARKET_DESCRIPTION, 
+  COLD_DRINK_CHANNEL_DESCRIPTION = COLD_DRINK_CHANNEL_DESCRIPTION,
+  sum_invoice_price = round(mean(INVOICE_PRICE),0)
+  #sum_invoice_price = round(sum(INVOICE_PRICE), 0)
+) 
+
+# Remove duplicate rows
+dat3 <- dat2[!duplicated(dat2), ]
+
+# Remove all negative values in sum_invoice_price
+dat4 <- dat3 %>% filter(sum_invoice_price > 0)
+dat4 <- dat4 %>% filter(sum_invoice_price < 25000)
+```
+
+
+```{r, warning=FALSE, message = FALSE, include=FALSE}
+# Join population data using census api
+census_api_key("455b1f8bad5dec096a88f9615cd18bcd6298f6d5", install = TRUE, overwrite = TRUE)
+```
+
+
+```{r, warning=FALSE, message = FALSE}
+# Join population data using census api
+zipcode_pop <- get_decennial(geography = "zip code tabulation area", variables = "P005003") %>% select(c("GEOID", "value"))
+zipcode_pop <- rename(zipcode_pop, ADDRESS_ZIP_CODE = GEOID)
+dat5 <- merge(x = dat4, y = zipcode_pop, by = "ADDRESS_ZIP_CODE")
+dat5 <- rename(dat5, population = value)
+
+# Remove rows that has 0 population
+dat6 <- dat5 %>% filter(population > 0)
+
+# Finalize data for ML model
+ml_data <- dat6 %>% select(c("SALES_OFFICE_DESCRIPTION",
+                            "DELIVERY_PLANT_DESCRIPTION",
+                            "CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION",
+                            "CUSTOMER_TRADE_CHANNEL_DESCRIPTION",
+                            "CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION", 
+                            "BUSINESS_TYPE_EXTENSION_DESCRIPTION",
+                            "MARKET_DESCRIPTION",
+                            "COLD_DRINK_CHANNEL_DESCRIPTION",
+                            "population",
+                            "sum_invoice_price"
+                            ))
+#dim(ml_dat)
+ml_dat <- dummy_cols(ml_data, select_columns = c("SALES_OFFICE_DESCRIPTION",
+                                      "DELIVERY_PLANT_DESCRIPTION",
+                                      "CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION",
+                                      "CUSTOMER_TRADE_CHANNEL_DESCRIPTION",
+                                      "CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION", 
+                                      "BUSINESS_TYPE_EXTENSION_DESCRIPTION",
+                                      "MARKET_DESCRIPTION",
+                                      "COLD_DRINK_CHANNEL_DESCRIPTION"
+                                      ))
+```
+In data preparation, I removed all duplicate row, made target variable using invoice_price, remove all negative values in sum_invoice_price, join population data, and removed rows that has 0 population. 
+
+# Modeling Process
+To meet our purpose, our team will be using clustering models and regression models, and in this Document, I will only be focusing on using Regression model using XGBoost.
+```{r, warning=FALSE, message = FALSE}
+# Load packages
+pacman::p_load(caret, xgboost, mlr)
+
+# Split Data
+set.seed(1000)
+InTrain <- caret::createDataPartition(ml_dat$sum_invoice_price, p=.7, list = F)
+
+train <- ml_dat %>% dplyr::slice(InTrain)
+test <- ml_dat %>% dplyr::slice(-InTrain)
+
+# define predictor and response varialbes in training 
+train_x <- data.matrix(train[, -10])
+train_y <- train[,10]
+
+# define predictor and response varialbes in test 
+test_x <- data.matrix(test[, -10])
+test_y <- test[, 10]
+
+# define final training and testing sets
+xgb_train <- xgb.DMatrix(data = train_x, label = train_y)
+xgb_test <- xgb.DMatrix(data = test_x, label = test_y)
+```
+
+The code below will help me to find best hyper parameters for the model and run cross validation. In this case, I didn't have to choose how to tune the model because I will be using semi auto-tuning method to get the best performing hyper parameters. 
+```{r, warning=FALSE, message = FALSE, results='hide'}
+start <- Sys.time()
+
+best_param <- list()
+best_seednumber <- 1234
+best_rmse <- Inf
+best_rmse_index <- 0
+
+set.seed(123)
+for (iter in 1:100) {
+  param <- list(objective = "reg:linear",
+                eval_metric = "rmse",
+                max_depth = sample(6:10, 1),
+                eta = runif(1, .01, .3), # Learning rate, default: 0.3
+                subsample = runif(1, .6, .9),
+                colsample_bytree = runif(1, .5, .8), 
+                min_child_weight = sample(1:40, 1)
+  )
+  cv.nround <-  1000
+  cv.nfold <-  5 # 5-fold cross-validation
+  seed.number  <-  sample.int(10000, 1) # set seed for the cv
+  set.seed(seed.number)
+  mdcv <- xgb.cv(data = xgb_train, params = param,  
+                 nfold = cv.nfold, nrounds = cv.nround,
+                 verbose = F, early_stopping_rounds = 8, maximize = FALSE)
+
+  min_rmse_index  <-  mdcv$best_iteration
+  min_rmse <-  mdcv$evaluation_log[min_rmse_index]$test_rmse_mean
+
+  if (min_rmse < best_rmse) {
+    best_rmse <- min_rmse
+    best_rmse_index <- min_rmse_index
+    best_seednumber <- seed.number
+    best_param <- param
+  }
+}
+
+# The best index (min_rmse_index) is the best "nround" in the model
+nround = best_rmse_index
+set.seed(best_seednumber)
+model_xgboost <- xgboost(data = xgb_train, params = best_param, nround = nround, verbose = F)
+
+
+print( Sys.time() - start )
+```
+
+```{r, warning=FALSE, message = FALSE}
+# Check error in testing data
+pred_y <- predict(model_xgboost, xgb_test)
+(MSE_xgb <- mean((pred_y - test_y)^2)) #mse
+caret::RMSE(test_y, pred_y) # rmse
+
+summary(test_y)
+```
+
+This model uses RMSE to evaluate the performance. It measures the average difference between values predicted by a model and the actual values. It provides an estimation of how well the model is able to predict the target value.
+The RMSE for model is 1173 which is little high. To train and predict the model, it takes little over than 4.5 minutes.
+
+
+# Result
+In summary, I still need to find more features to train which requires to do more feature engineering. I think that having more features will help the model to train and predict better.
+RMSE of 1173 is little high to use it in a real business situation. Since the target variable is spread out, it may be a good idea to use clustering method. 
+
+

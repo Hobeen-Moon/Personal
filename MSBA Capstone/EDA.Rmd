@@ -1,0 +1,372 @@
+---
+title: "Capstone"
+author: "Hobeen Moon"
+date: "2/14/2023"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# Things to consider
+* What is the purpose of the project?
+  - Swire wants to know how long the customer will last.
+  - To understand the customer, we can use popularity and longevity of the customer.
+
+* When Swire make a contract with a business, what kind of data will they have access to?
+  - All the provided data is historical data of swire selling a product to a customer, who already made a contract, so we won't have this data when predicting a new customer. 
+  - Only data we have is location, business type, trade channel, and market.
+  - We can add population, and ratings data.
+  
+  
+* What can be a target variable?
+  - We can use non historical data to predict the invoice_price.
+  - If we can get a a ratings for all the stores, we can use the non historical data to predict the rating of the customer. 
+  - In this situation, definition of customer success can be defined in a two ways, invoice price, and the ratings. 
+  
+* What to do with the historical data?
+  - Since we don't have any historical data of the new customer, we can't use that data for prediction. How can I use this data?
+
+# Summary
+*  In the final model(data), I will be using only non historical data. I will be removing historical data since I won't be able to use historical data in the future prediction. There are some negative values in sum_invoce_price and I am going to remove these rows as well since negative values will not happen in the future prediction. To build a better model, it is needed to find a way to ratings using Google or Yelp api. 
+
+After doing EDA, target varialbe could be a ratings of the customer. The model will predict the model should predict rating of future customer using non historical data.  
+
+```{r}
+pacman::p_load(tidyverse, RODBC)
+```
+
+# Load and Join data Set
+```{r}
+#wb1 <- "C:/Users/qlekr/Desktop/School/UoU/UoU/project/FSOP_Customer_Data.xlsb"
+#wb2 <- "C:/Users/qlekr/Desktop/School/UoU/UoU/project/FSOP_Sales_Data.xlsb"
+
+#con1 <- odbcConnectExcel2007(wb1)
+#con2 <- odbcConnectExcel2007(wb2)
+
+#data1 <- sqlFetch(con1, "Customer Info")
+#data2 <- sqlFetch(con2, "FSOP_Sales_Data")
+
+#dat <- merge(x = data1, y = data2, by = "CUSTOMER_NUMBER_BLINDED")
+
+#glimpse(dat)
+ #write.csv(dat, "C:/Users/qlekr/Desktop/School/UoU/UoU/project/combined_data.csv", row.names=FALSE)
+```
+
+# Load Data
+```{r}
+dat <- read_csv("C:/Users/qlekr/Desktop/School/UoU/UoU/project/combined_data.csv")
+```
+
+
+# select non historical data only
+```{r}
+dat1 <- dat %>% select(c(CUSTOMER_NUMBER_BLINDED, SALES_OFFICE_DESCRIPTION, DELIVERY_PLANT_DESCRIPTION, ON_BOARDING_DATE, ADDRESS_CITY, ADDRESS_ZIP_CODE, COUNTY, GEO_LONGITUDE, GEO_LATITUDE, CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION, CUSTOMER_TRADE_CHANNEL_DESCRIPTION, CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION, BUSINESS_TYPE_EXTENSION_DESCRIPTION, MARKET_DESCRIPTION, COLD_DRINK_CHANNEL_DESCRIPTION, INVOICE_PRICE))
+```
+
+# Summary of data
+```{r}
+summary(dat1)
+```
+
+* Negative values in invoice_price
+* Some on_boarding_date is not correct. ie) 9999-12-31 
+
+```{r}
+dat1 %>% head()
+```
+
+```{r}
+dat2 <- dat1 %>% group_by(CUSTOMER_NUMBER_BLINDED) %>% summarise(
+  CUSTOMER_NUMBER_BLINDED = CUSTOMER_NUMBER_BLINDED, 
+  SALES_OFFICE_DESCRIPTION = SALES_OFFICE_DESCRIPTION, 
+  DELIVERY_PLANT_DESCRIPTION = DELIVERY_PLANT_DESCRIPTION, 
+  ON_BOARDING_DATE = ON_BOARDING_DATE, 
+  ADDRESS_CITY = ADDRESS_CITY, 
+  ADDRESS_ZIP_CODE = ADDRESS_ZIP_CODE, 
+  COUNTY = COUNTY, 
+  GEO_LONGITUDE = GEO_LONGITUDE, 
+  GEO_LATITUDE = GEO_LATITUDE, 
+  CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION = CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION, 
+  CUSTOMER_TRADE_CHANNEL_DESCRIPTION = CUSTOMER_TRADE_CHANNEL_DESCRIPTION, 
+  CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION = CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION, 
+  BUSINESS_TYPE_EXTENSION_DESCRIPTION = BUSINESS_TYPE_EXTENSION_DESCRIPTION, 
+  MARKET_DESCRIPTION = MARKET_DESCRIPTION, 
+  COLD_DRINK_CHANNEL_DESCRIPTION = COLD_DRINK_CHANNEL_DESCRIPTION,
+  sum_invoice_price = avg(INVOICE_PRICE)
+) 
+```
+
+
+
+# checking total null values
+```{r}
+colSums(is.na(dat2))
+```
+Some county has NA(27) values. 
+
+# Check dimension of data
+```{r}
+dim(dat2)
+```
+831844 rows, and 16 columns
+Need to remove duplicate rows. 
+
+# Remove duplicate rows. 
+```{r}
+dat3 <- dat2[!duplicated(dat2), ]
+```
+
+# Check dimension again after removing duplicates
+```{r}
+dim(dat3)
+```
+40386 Rows and 16 columns. 
+This number matches with the number of Customers data. 
+
+# check if there is any negative sum_invoice_price
+```{r}
+dat3 %>% filter(sum_invoice_price == 0) %>% select(CUSTOMER_NUMBER_BLINDED, sum_invoice_price)
+```
+67 Customer has negative sum_invoice_price. I am going to remove these customers from the data until I find out what negative sum_invoice_price means. 
+
+5387 customers have 0 sum_invoice_price. 
+
+
+# Remove negative sum_invoice_price from data
+```{r}
+dat4 <- dat3 %>% filter(sum_invoice_price > 0)
+```
+
+```{r}
+dim(dat4)
+```
+
+# Check relationship between sum_invoice_price and other variables. 
+* List of variables 
+  - SALES_OFFICE_DESCRIPTION 
+  - DELIVERY_PLANT_DESCRIPTION 
+  - ON_BOARDING_DATE (check by month)
+  - ADDRESS_ZIP_CODE  
+  - COUNTY 
+  - CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION  
+  - CUSTOMER_TRADE_CHANNEL_DESCRIPTION 
+  - CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION  
+  - BUSINESS_TYPE_EXTENSION_DESCRIPTION 
+  - COLD_DRINK_CHANNEL_DESCRIPTION
+
+```{r}
+ggplot(dat4, mapping = aes(x = SALES_OFFICE_DESCRIPTION, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(dat4, mapping = aes(x = DELIVERY_PLANT_DESCRIPTION, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(dat4, mapping = aes(x = ADDRESS_ZIP_CODE, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(dat4, mapping = aes(x = COUNTY, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(dat4, mapping = aes(x = CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(dat4, mapping = aes(x = CUSTOMER_TRADE_CHANNEL_DESCRIPTION, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(dat4, mapping = aes(x = CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(dat4, mapping = aes(x = BUSINESS_TYPE_EXTENSION_DESCRIPTION, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+
+```{r}
+ggplot(dat4, mapping = aes(x = COLD_DRINK_CHANNEL_DESCRIPTION, y = sum_invoice_price)) +
+  geom_boxplot()
+```
+
+It is difficult to see the trend using boxplot since the sum_invoice_price.
+But We can see there is a difference by each segment. 
+
+# Join Population data
+```{r}
+pacman::p_load(tidycensus)
+census_api_key("455b1f8bad5dec096a88f9615cd18bcd6298f6d5", install = TRUE, overwrite = TRUE)
+```
+
+```{r}
+zipcode_pop <- get_decennial(geography = "zip code tabulation area", variables = "P005003") %>% select(c("GEOID", "value"))
+```
+
+```{r}
+zipcode_pop <- rename(zipcode_pop, ADDRESS_ZIP_CODE = GEOID)
+```
+
+```{r}
+dat5 <- merge(x = dat4, y = zipcode_pop, by = "ADDRESS_ZIP_CODE")
+```
+
+```{r}
+colSums(is.na(dat5))
+```
+
+```{r}
+dat5 <- rename(dat5, population = value)
+```
+
+```{r}
+dat6 <- dat5 %>% filter(population > 0)
+```
+
+```{r}
+ggplot(dat6, aes(x = population, y = sum_invoice_price)) + 
+  geom_point()
+```
+
+```{r}
+ggplot(dat6, aes(x = ADDRESS_ZIP_CODE, y = sum_invoice_price)) + 
+  geom_point()
+```
+
+```{r}
+#dat6 %>% select(CUSTOMER_NUMBER_BLINDED, ADDRESS_ZIP_CODE, population)
+```
+
+# Get customer rating. 
+
+```{r}
+pacman::p_load(yelpr)
+
+#clientID <- oct5RJT2Ce_qhC_hVZgBHw
+api <- "VMmBCpVPhk4s9cc7nJYWTC6jA0KD8tJKYjZMRzdjsuQCKhJsANJOxz6OWf4hlKgKUf0QMnda4-6uqazwMAgvncEYINDC5fe8D98nYGp4gCNjYfkwPk2Xtq8Krw8JZHYx"
+```
+
+```{r}
+Business_name <- "Olive Garden"
+location <- "Los Angeles, CA"
+limit <- 50
+
+Yelp <- business_search(api_key = api, term = Business_name, location = location, limit = limit)
+
+Yelp1 <- Yelp$businesses
+
+Yelp1
+```
+
+```{r}
+Yelp <- business_search(api_key = api, longitude = "-101.0391", latitude = "39.37980")
+
+Yelp2 <- Yelp$businesses
+
+Yelp2 %>% select(id, alias, name, image_url, is_closed, url, review_count, categories, rating, coordinates.latitude, coordinates.longitude, transactions, price,address, phone)
+
+```
+
+https://docs.developer.yelp.com/docs/fusion-intro
+
+https://docs.developer.yelp.com/reference/v3_business_search
+
+https://github.com/OmaymaS/yelpr
+
+# Prediction Model
+## XGBoost
+```{r}
+pacman::p_load(caret, xgboost, mlr)
+```
+
+```{r}
+# Select features
+ml_dat <- dat6 %>% select(c("SALES_OFFICE_DESCRIPTION",
+                            "DELIVERY_PLANT_DESCRIPTION",
+                            "CUSTOMER_ACTIVITY_CLUSTER_DESCRIPTION",
+                            "CUSTOMER_TRADE_CHANNEL_DESCRIPTION",
+                            "CUSTOMER_SUB_TRADE_CHANNEL_DESCRIPTION", 
+                            "BUSINESS_TYPE_EXTENSION_DESCRIPTION",
+                            "MARKET_DESCRIPTION",
+                            "COLD_DRINK_CHANNEL_DESCRIPTION",
+                            "population",
+                            "sum_invoice_price"
+                            ))
+  
+# Split Data
+set.seed(1000)
+InTrain <- caret::createDataPartition(ml_dat$sum_invoice_price, p=.7, list = F)
+
+train <- ml_dat %>% dplyr::slice(InTrain)
+test <- ml_dat %>% dplyr::slice(-InTrain)
+
+# define predictor and response varialbes in training 
+train_x <- data.matrix(train[, -10])
+train_y <- train[,10]
+
+# define predictor and response varialbes in test 
+test_x <- data.matrix(test[, -10])
+test_y <- test[, 10]
+
+# define final training and testing sets
+xgb_train <- xgb.DMatrix(data = train_x, label = train_y)
+xgb_test <- xgb.DMatrix(data = test_x, label = test_y)
+```
+
+
+```{r}
+best_param <- list()
+best_seednumber <- 1234
+best_rmse <- Inf
+best_rmse_index <- 0
+
+set.seed(123)
+for (iter in 1:100) {
+  param <- list(objective = "reg:linear",
+                eval_metric = "rmse",
+                max_depth = sample(6:10, 1),
+                eta = runif(1, .01, .3), # Learning rate, default: 0.3
+                subsample = runif(1, .6, .9),
+                colsample_bytree = runif(1, .5, .8), 
+                min_child_weight = sample(1:40, 1)
+  )
+  cv.nround <-  1000
+  cv.nfold <-  5 # 5-fold cross-validation
+  seed.number  <-  sample.int(10000, 1) # set seed for the cv
+  set.seed(seed.number)
+  mdcv <- xgb.cv(data = xgb_train, params = param,  
+                 nfold = cv.nfold, nrounds = cv.nround,
+                 verbose = F, early_stopping_rounds = 8, maximize = FALSE)
+
+  min_rmse_index  <-  mdcv$best_iteration
+  min_rmse <-  mdcv$evaluation_log[min_rmse_index]$test_rmse_mean
+
+  if (min_rmse < best_rmse) {
+    best_rmse <- min_rmse
+    best_rmse_index <- min_rmse_index
+    best_seednumber <- seed.number
+    best_param <- param
+  }
+}
+
+# The best index (min_rmse_index) is the best "nround" in the model
+nround = best_rmse_index
+set.seed(best_seednumber)
+model_xgboost <- xgboost(data = xgb_train, params = best_param, nround = nround, verbose = F)
+
+# Check error in testing data
+pred_y <- predict(model_xgboost, xgb_test)
+(MSE_xgb <- mean((pred_y - test_y)^2)) #mse
+caret::RMSE(test_y, pred_y) # rmse
+```
